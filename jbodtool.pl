@@ -50,6 +50,7 @@ sub scan {
   # Lets cache some info
   my $zpools=&get_zpool_status();
   my $glabels=&get_glabels();
+  my $gstripes=&get_gstripes();
 
   my $sthdisk=$dbh->prepare("INSERT OR REPLACE INTO disks (dev,sas,enclosure,model,online,label,slot,pool,badblocks,diskid) VALUES (?,?,?,?,strftime('%s','now'),?,?,?,?,?)");
   my $sthenc=$dbh->prepare("INSERT OR REPLACE INTO enclosures (name, dev, sas,model) VALUES ((SELECT name FROM enclosures WHERE sas=?),?,?,?)");
@@ -80,15 +81,21 @@ sub scan {
           my $oldbadblocks=$dbh->selectrow_array("SELECT badblocks FROM disks WHERE sas=?",undef,$sas);
           if(defined($glabels->{$dev})) {
             $label=$glabels->{$dev};
+          } elsif(defined($gstripes->{$dev})) {
+            $label=$gstripes->{$dev};
           }
           # Check dev against pool
           if(defined($zpools->{$dev}) && defined($zpools->{$dev}->{pool})) {
             $pool=$zpools->{$dev}->{pool};
           } 
           # Check label against pool
-          if(defined($label) && defined($zpools->{"label/".$label}) && defined($zpools->{"label/".$label}->{pool})) {
-            $pool=$zpools->{"label/".$label}->{pool};
-          }
+          if(defined($label)) {
+            if(defined($zpools->{"label/".$label}) && defined($zpools->{"label/".$label}->{pool})) {
+              $pool=$zpools->{"label/".$label}->{pool};
+            } elsif(defined($zpools->{"stripe/".$label}) && defined($zpools->{"stripe/".$label}->{pool})) {
+              $pool=$zpools->{"stripe/".$label}->{pool};
+            }
+          } 
           
           if(!defined($oldbadblocks)) {
             print "New disk $dev ($sas) at $enc $slot\n";
@@ -247,6 +254,17 @@ sub get_glabels {
     }
   }
   return $glabels;
+}
+
+sub get_gstripes {
+  open(GSTRIPE,"/sbin/gstripe status -s|");
+  my $gstripes={};
+  while (<GSTRIPE>) {
+    if(/stripe\/(\S+)\s+UP\s+(\S+)/) {
+      $gstripes->{$2}=$1;
+    }
+  }
+  return $gstripes;
 }
 
 sub get_slot {
